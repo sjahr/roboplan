@@ -59,6 +59,10 @@ public:
   /// @return The Pinocchio model.
   const pinocchio::Model& getModel() const { return model_; };
 
+  /// @brief Gets the scene's internal Pinocchio data.
+  /// @return The Pinocchio data.
+  pinocchio::Data& getData() const { return model_data_; };
+
   /// @brief Gets the scene's full joint names, including mimic joints.
   /// @return A vector of joint names.
   const std::vector<std::string>& getJointNames() const { return joint_names_; };
