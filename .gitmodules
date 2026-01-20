@@ -1,8 +1,8 @@
 [submodule "external/toppra"]
 	path = external/toppra
 	url = https://github.com/open-planning/toppra.git
-[submodule "roboplan_oink/osqp-eigen"]
-	path = roboplan_oink/osqp-eigen
+[submodule "roboplan_oink/external/osqp-eigen"]
+	path = roboplan_oink/external/osqp-eigen
 	url = https://github.com/gbionics/osqp-eigen.git
 	branch = v0.11.0
 [submodule "roboplan_oink/external/osqp"]
