@@ -10,59 +10,20 @@ find_package(roboplan REQUIRED)
 
 # Try to find OsqpEigen, build from source if not found or version < 1.0.0
 find_package(OsqpEigen QUIET)
-set(BUILD_OSQPEIGEN_FROM_SOURCE FALSE)
 
 if(NOT OsqpEigen_FOUND)
-  message(STATUS "OsqpEigen not found. Building from source in external/osqp-eigen")
-  set(BUILD_OSQPEIGEN_FROM_SOURCE TRUE)
-elseif(OsqpEigen_VERSION VERSION_LESS "1.0.0")
-  if(DEFINED OsqpEigen_VERSION)
-    message(STATUS "Found OsqpEigen ${OsqpEigen_VERSION} but version < 1.0.0. Building newer version from source")
-  else()
-    message(STATUS "Found OsqpEigen with unknown version. Building from source to ensure v1.0.0+")
-  endif()
-  set(BUILD_OSQPEIGEN_FROM_SOURCE TRUE)
-endif()
-
-if(BUILD_OSQPEIGEN_FROM_SOURCE)
   # When building OsqpEigen from source, we need OSQP >= 1.0.0
   find_package(osqp QUIET)
   set(BUILD_OSQP_FROM_SOURCE FALSE)
 
-  if(NOT osqp_FOUND)
-    set(BUILD_OSQP_FROM_SOURCE TRUE)
-  elseif(osqp_VERSION VERSION_LESS "1.0.0")
-    set(BUILD_OSQP_FROM_SOURCE TRUE)
-    # Clear cache variables
-    unset(osqp_FOUND)
-    unset(osqp_DIR CACHE)
-    unset(osqp_INCLUDE_DIR CACHE)
-    unset(osqp_INCLUDE_DIRS CACHE)
-    unset(osqp_LIBRARIES CACHE)
-    unset(osqp_LIBRARY CACHE)
-  else()
-    message(STATUS "Found OSQP ${osqp_VERSION}: ${osqp_DIR}")
-  endif()
-
-  # Build OSQP from source if needed
-  if(BUILD_OSQP_FROM_SOURCE)
-    message(STATUS "Building OSQP v1.0.0 from source (external/osqp)")
-
+  if(NOT osqp_FOUND OR osqp_VERSION VERSION_LESS "1.0.0")
     # Disable OSQP tests and demos
     set(OSQP_BUILD_DEMO OFF CACHE INTERNAL "Disable OSQP demo")
     set(OSQP_BUILD_UNITTESTS OFF CACHE INTERNAL "Disable OSQP tests")
 
-    # Save and disable BUILD_TESTING to prevent OSQP from building tests
-    set(BUILD_TESTING_OSQP ${BUILD_TESTING})
-    set(BUILD_TESTING OFF)
-
     # Add OSQP from submodule
     # Note: Not using EXCLUDE_FROM_ALL so it will be installed for downstream packages
     add_subdirectory(external/osqp)
-
-    # Restore BUILD_TESTING
-    set(BUILD_TESTING ${BUILD_TESTING_OSQP})
-    unset(BUILD_TESTING_OSQP)
 
     # OSQP creates non-namespaced targets when built via add_subdirectory
     # Create namespaced aliases so OsqpEigen can find them
@@ -84,18 +45,11 @@ if(BUILD_OSQPEIGEN_FROM_SOURCE)
     set(OSQP_IS_V1_FINAL TRUE CACHE BOOL "OSQP is version 1.0.0 final" FORCE)
   endif()
 
-  # Save current BUILD_TESTING value and disable testing for OsqpEigen
-  set(BUILD_TESTING_OSQPEIGEN ${BUILD_TESTING})
-  set(BUILD_TESTING OFF)
   set(OSQPEIGEN_COMPILE_tests OFF CACHE INTERNAL "Disable OsqpEigen tests")
 
   # Add the external osqp-eigen project
   # Note: Not using EXCLUDE_FROM_ALL so it can be installed for downstream packages
   add_subdirectory(external/osqp-eigen)
-
-  # Restore the original BUILD_TESTING value
-  set(BUILD_TESTING ${BUILD_TESTING_OSQPEIGEN})
-  unset(BUILD_TESTING_OSQPEIGEN)
 endif()
 
 # Ament CMake is not immediately required, but we include it at the top so that
