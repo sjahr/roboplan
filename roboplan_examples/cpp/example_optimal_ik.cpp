@@ -64,12 +64,15 @@ int main(int /*argc*/, char* /*argv*/[]) {
   auto position_limit = std::make_shared<PositionLimit>(num_variables, 1.0);  // gain = 1.0
   std::vector<std::shared_ptr<Constraints>> constraints = {position_limit};
 
+  // No barriers for this example
+  std::vector<std::shared_ptr<Barrier>> barriers;
+
   // Create Oink instance
   Oink oink(num_variables);
 
   // Solve IK with constraints
   Eigen::VectorXd delta_q;
-  auto result = oink.solveIk(tasks, constraints, scene, delta_q);
+  auto result = oink.solveIk(tasks, constraints, barriers, scene, delta_q);
 
   if (!result.has_value()) {
     std::cout << "IK solve failed: " << result.error() << "\n";

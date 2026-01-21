@@ -64,6 +64,7 @@ add_library(roboplan_oink SHARED
     src/tasks/frame.cpp
     src/constraints/position_limit.cpp
     src/constraints/velocity_limit.cpp
+    src/barriers/frame_containment.cpp
 )
 target_include_directories(roboplan_oink PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

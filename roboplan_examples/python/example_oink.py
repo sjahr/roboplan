@@ -151,7 +151,8 @@ def main(
             if current_tasks:
                 # Solve IK for one step with constraints
                 try:
-                    delta_q = oink.solveIk(current_tasks, constraints, scene)
+                    barriers = []  # No barriers for this example
+                    delta_q = oink.solveIk(current_tasks, constraints, barriers, scene)
                 except RuntimeError as e:
                     print(f"Warning: IK solver failed: {e}, using zero delta_q")
                     delta_q = np.zeros(num_variables)

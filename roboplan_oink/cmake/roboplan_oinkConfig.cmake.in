@@ -1,6 +1,9 @@
 @PACKAGE_INIT@
 
 find_package(roboplan REQUIRED)
+
+# OsqpEigen is required since it's exposed in roboplan_oink's public headers
+# If OsqpEigen was built from source with roboplan_oink, it should be installed
 find_package(OsqpEigen REQUIRED)
 
 include("${CMAKE_CURRENT_LIST_DIR}/roboplan_oinkTargets.cmake")

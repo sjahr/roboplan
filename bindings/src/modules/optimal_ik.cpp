@@ -5,6 +5,7 @@
 #include <nanobind/stl/vector.h>
 
 #include <roboplan/core/scene.hpp>
+#include <roboplan_oink/barriers/frame_containment.hpp>
 #include <roboplan_oink/constraints/position_limit.hpp>
 #include <roboplan_oink/constraints/velocity_limit.hpp>
 #include <roboplan_oink/optimal_ik.hpp>
@@ -69,6 +70,22 @@ void init_optimal_ik(nanobind::module_& m) {
       .def_rw("v_max", &VelocityLimit::v_max)
       .def("computeQpConstraints", &VelocityLimit::computeQpConstraints);
 
+  // Bind the abstract Barrier base class
+  nanobind::class_<Barrier>(m, "Barrier")
+      .def_ro("barrier_dim", &Barrier::barrier_dim_)
+      .def_rw("dt", &Barrier::dt_)
+      .def_rw("gain", &Barrier::gain_);
+
+  // Bind FrameContainmentBarrier
+  nanobind::class_<FrameContainmentBarrier, Barrier>(m, "FrameContainmentBarrier")
+      .def(nanobind::init<const std::string&, const Eigen::Vector3d&, const Eigen::Vector3d&, int,
+                          double, double>(),
+           "frame_name"_a, "box_center"_a, "box_dimensions"_a, "num_variables"_a, "dt"_a,
+           "gain"_a = 1.0)
+      .def_rw("frame_name", &FrameContainmentBarrier::frame_name_)
+      .def_rw("box_center", &FrameContainmentBarrier::box_center_)
+      .def_rw("box_half_extents", &FrameContainmentBarrier::box_half_extents_);
+
   // Bind Oink solver
   nanobind::class_<Oink>(m, "Oink")
       .def(nanobind::init<int>(), "num_variables"_a)
@@ -76,17 +93,18 @@ void init_optimal_ik(nanobind::module_& m) {
           "solveIk",
           [](Oink& self, const std::vector<std::shared_ptr<Task>>& tasks,
              const std::vector<std::shared_ptr<Constraints>>& constraints,
+             const std::vector<std::shared_ptr<Barrier>>& barriers,
              const std::shared_ptr<Scene>& scene) -> Eigen::VectorXd {
             Eigen::VectorXd delta_q;
-            auto result = self.solveIk(tasks, constraints, *scene, delta_q);
+            auto result = self.solveIk(tasks, constraints, barriers, *scene, delta_q);
             if (!result.has_value()) {
               throw std::runtime_error("IK solve failed: " + result.error());
             }
             return delta_q;
           },
-          "tasks"_a, "constraints"_a, "scene"_a,
-          "Solve inverse kinematics with constraints and return delta_q. Raises RuntimeError on "
-          "failure.");
+          "tasks"_a, "constraints"_a, "barriers"_a, "scene"_a,
+          "Solve inverse kinematics with constraints and barriers, return delta_q. Raises "
+          "RuntimeError on failure.");
 }
 
 }  // namespace roboplan
