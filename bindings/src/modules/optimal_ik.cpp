@@ -5,6 +5,7 @@
 #include <nanobind/stl/vector.h>
 
 #include <roboplan/core/scene.hpp>
+#include <roboplan_oink/barriers/position_barrier.hpp>
 #include <roboplan_oink/constraints/position_limit.hpp>
 #include <roboplan_oink/constraints/velocity_limit.hpp>
 #include <roboplan_oink/optimal_ik.hpp>
@@ -80,6 +81,34 @@ void init_optimal_ik(nanobind::module_& m) {
       .def_rw("dt", &VelocityLimit::dt, "Time step for velocity calculation.")
       .def_rw("v_max", &VelocityLimit::v_max, "Maximum joint velocities.");
 
+  // Bind the abstract Barrier base class
+  nanobind::class_<Barrier>(m, "Barrier", "Abstract base class for Control Barrier Functions.")
+      .def("get_num_barriers", &Barrier::getNumBarriers, "scene"_a,
+           "Get the number of barrier constraints.")
+      .def_ro("gain", &Barrier::gain, "Barrier gain (gamma).")
+      .def_ro("dt", &Barrier::dt, "Timestep.");
+
+  // Bind PositionBarrier
+  nanobind::class_<PositionBarrier, Barrier>(
+      m, "PositionBarrier",
+      "Position barrier constraint that keeps a frame within an axis-aligned bounding box.")
+      // Full box constructor (all 3 axes)
+      .def(nanobind::init<const std::string&, const Eigen::Vector3d&, const Eigen::Vector3d&, int,
+                          double, double>(),
+           "frame_name"_a, "p_min"_a, "p_max"_a, "num_variables"_a, "gain"_a = 1.0, "dt"_a = 0.01,
+           "Create a position barrier for all 3 axes (x, y, z).")
+      // Selective axis constructor
+      .def(nanobind::init<const std::string&, const std::vector<int>&, const Eigen::VectorXd&,
+                          const Eigen::VectorXd&, int, double, double>(),
+           "frame_name"_a, "indices"_a, "p_min"_a, "p_max"_a, "num_variables"_a, "gain"_a = 1.0,
+           "dt"_a = 0.01, "Create a position barrier for selected axes only.")
+      .def("get_frame_position", &PositionBarrier::getFramePosition, "scene"_a,
+           "Get the current frame position in world coordinates.")
+      .def_ro("frame_name", &PositionBarrier::frame_name, "Name of the constrained frame.")
+      .def_ro("indices", &PositionBarrier::indices, "Constrained axis indices.")
+      .def_ro("p_min", &PositionBarrier::p_min, "Minimum position bounds.")
+      .def_ro("p_max", &PositionBarrier::p_max, "Maximum position bounds.");
+
   // Bind Oink solver
   nanobind::class_<Oink>(m, "Oink", "Optimal Inverse Kinematics solver.")
       .def(nanobind::init<int>(), "num_variables"_a)
@@ -87,20 +116,22 @@ void init_optimal_ik(nanobind::module_& m) {
           "solveIk",
           [](Oink& self, const std::vector<std::shared_ptr<Task>>& tasks,
              const std::vector<std::shared_ptr<Constraints>>& constraints,
+             const std::vector<std::shared_ptr<Barrier>>& barriers,
              const std::shared_ptr<Scene>& scene, nanobind::DRef<Eigen::VectorXd> delta_q) {
-            auto result = self.solveIk(tasks, constraints, *scene, delta_q);
+            auto result = self.solveIk(tasks, constraints, barriers, *scene, delta_q);
             if (!result.has_value()) {
               throw std::runtime_error("IK solve failed: " + result.error());
             }
           },
-          "tasks"_a, "constraints"_a, "scene"_a, "delta_q"_a,
-          "Solve inverse kinematics for given tasks and constraints.\n\n"
+          "tasks"_a, "constraints"_a, "barriers"_a, "scene"_a, "delta_q"_a,
+          "Solve inverse kinematics for given tasks, constraints, and barriers.\n\n"
           "Solves a QP optimization problem to compute the joint velocity that minimizes\n"
-          "weighted task errors while satisfying all constraints. The result is written\n"
-          "directly into the provided delta_q buffer.\n\n"
+          "weighted task errors while satisfying all constraints and barrier functions.\n"
+          "The result is written directly into the provided delta_q buffer.\n\n"
           "Args:\n"
           "    tasks: List of weighted tasks to optimize for.\n"
           "    constraints: List of constraints to satisfy.\n"
+          "    barriers: List of barrier functions for safety constraints.\n"
           "    scene: Scene containing robot model and state.\n"
           "    delta_q: Pre-allocated numpy array for output (size = num_variables).\n"
           "             Must be a contiguous float64 array. Modified in-place.\n\n"
@@ -108,7 +139,7 @@ void init_optimal_ik(nanobind::module_& m) {
           "    RuntimeError: If the QP solver fails to find a solution.\n\n"
           "Example:\n"
           "    delta_q = np.zeros(oink.num_variables)\n"
-          "    oink.solveIk(tasks, constraints, scene, delta_q)");
+          "    oink.solveIk(tasks, constraints, barriers, scene, delta_q)");
 }
 
 }  // namespace roboplan

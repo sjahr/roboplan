@@ -18,6 +18,7 @@ from roboplan.optimal_ik import (
     FrameTask,
     FrameTaskOptions,
     Oink,
+    PositionBarrier,
     PositionLimit,
     VelocityLimit,
 )
@@ -30,6 +31,8 @@ def main(
     lm_damping: float = 2.0,
     control_freq: float = 100.0,
     max_joint_velocity: float = 1.0,
+    barrier_gain: float = 5.0,
+    barrier_size: float = 1.0,
     host: str = "localhost",
     port: str = "8000",
 ):
@@ -42,6 +45,8 @@ def main(
         lm_damping: Levenberg-Marquardt damping for regularization.
         control_freq: Control loop frequency in Hz.
         max_joint_velocity: Maximum joint velocity in rad/s for all joints.
+        barrier_gain: Barrier gain for the position barrier constraint.
+        barrier_size: Size of the cubic barrier box around the EE start position (meters).
         host: The host for the ViserVisualizer.
         port: The port for the ViserVisualizer.
     """
@@ -121,6 +126,44 @@ def main(
     velocity_limit = VelocityLimit(num_variables, dt, v_max)
 
     constraints = [position_limit, velocity_limit]
+
+    # Get initial EE position for barrier creation
+    initial_ee_pose = scene.forwardKinematics(q_full, model_data.ee_names[0])
+    initial_ee_pos = initial_ee_pose[:3, 3]
+
+    # Create position barrier: 1x1x1m box centered on initial EE position
+    half_size = barrier_size / 2.0
+    p_min = initial_ee_pos - half_size
+    p_max = initial_ee_pos + half_size
+    position_barrier = PositionBarrier(
+        model_data.ee_names[0], p_min, p_max, num_variables, gain=barrier_gain, dt=dt
+    )
+    barriers = [position_barrier]
+
+    print(f"\nPosition Barrier:")
+    print(f"  EE start position: {initial_ee_pos}")
+    print(f"  Box min: {p_min}")
+    print(f"  Box max: {p_max}")
+    print(f"  Gain: {barrier_gain}, dt: {dt}")
+
+    # Visualize the barrier box in Viser
+    box_center = initial_ee_pos
+    viz.viewer.scene.add_box(
+        "/barrier_box",
+        dimensions=(barrier_size, barrier_size, barrier_size),
+        position=box_center,
+        color=(255, 100, 100),
+        opacity=0.15,
+    )
+    # Add wireframe edges for better visibility
+    viz.viewer.scene.add_box(
+        "/barrier_box_wireframe",
+        dimensions=(barrier_size, barrier_size, barrier_size),
+        position=box_center,
+        color=(255, 50, 50),
+        opacity=0.5,
+        side="back",  # Only render back faces for wireframe effect
+    )
 
     # Validate starting joint configuration size (should match nq)
     q_canonical_raw = np.array(model_data.starting_joint_config)
@@ -226,7 +269,9 @@ def main(
                     # Pre-allocate delta_q buffer for in-place modification
                     delta_q = np.zeros(num_variables)
                     try:
-                        oink.solveIk(current_tasks, constraints, scene, delta_q)
+                        oink.solveIk(
+                            current_tasks, constraints, barriers, scene, delta_q
+                        )
                     except RuntimeError as e:
                         print(f"Warning: IK solver failed: {e}, using zero delta_q")
 
