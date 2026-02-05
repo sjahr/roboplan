@@ -86,7 +86,11 @@ void init_optimal_ik(nanobind::module_& m) {
       .def("get_num_barriers", &Barrier::getNumBarriers, "scene"_a,
            "Get the number of barrier constraints.")
       .def_ro("gain", &Barrier::gain, "Barrier gain (gamma).")
-      .def_ro("dt", &Barrier::dt, "Timestep.");
+      .def_ro("dt", &Barrier::dt, "Timestep.")
+      .def_ro("safe_displacement_gain", &Barrier::safe_displacement_gain,
+              "Gain for safe displacement regularization.")
+      .def_ro("safety_margin", &Barrier::safety_margin,
+              "Conservative margin for hard constraints.");
 
   // Bind PositionBarrier
   nanobind::class_<PositionBarrier, Barrier>(
@@ -94,14 +98,16 @@ void init_optimal_ik(nanobind::module_& m) {
       "Position barrier constraint that keeps a frame within an axis-aligned bounding box.")
       // Full box constructor (all 3 axes)
       .def(nanobind::init<const std::string&, const Eigen::Vector3d&, const Eigen::Vector3d&, int,
-                          double, double>(),
+                          double, double, double, double>(),
            "frame_name"_a, "p_min"_a, "p_max"_a, "num_variables"_a, "gain"_a = 1.0, "dt"_a = 0.01,
+           "safe_displacement_gain"_a = 1.0, "safety_margin"_a = 0.0,
            "Create a position barrier for all 3 axes (x, y, z).")
       // Selective axis constructor
       .def(nanobind::init<const std::string&, const std::vector<int>&, const Eigen::VectorXd&,
-                          const Eigen::VectorXd&, int, double, double>(),
+                          const Eigen::VectorXd&, int, double, double, double, double>(),
            "frame_name"_a, "indices"_a, "p_min"_a, "p_max"_a, "num_variables"_a, "gain"_a = 1.0,
-           "dt"_a = 0.01, "Create a position barrier for selected axes only.")
+           "dt"_a = 0.01, "safe_displacement_gain"_a = 1.0, "safety_margin"_a = 0.0,
+           "Create a position barrier for selected axes only.")
       .def("get_frame_position", &PositionBarrier::getFramePosition, "scene"_a,
            "Get the current frame position in world coordinates.")
       .def_ro("frame_name", &PositionBarrier::frame_name, "Name of the constrained frame.")
@@ -111,9 +117,11 @@ void init_optimal_ik(nanobind::module_& m) {
 
   // Bind Oink solver
   nanobind::class_<Oink>(m, "Oink", "Optimal Inverse Kinematics solver.")
-      .def(nanobind::init<int>(), "num_variables"_a)
+      .def(nanobind::init<int>(), "num_variables"_a,
+           "Constructor with number of optimization variables.")
+      .def_ro("num_variables", &Oink::num_variables, "Number of optimization variables.")
       .def(
-          "solveIk",
+          "solve_ik",
           [](Oink& self, const std::vector<std::shared_ptr<Task>>& tasks,
              const std::vector<std::shared_ptr<Constraints>>& constraints,
              const std::vector<std::shared_ptr<Barrier>>& barriers,
@@ -139,7 +147,7 @@ void init_optimal_ik(nanobind::module_& m) {
           "    RuntimeError: If the QP solver fails to find a solution.\n\n"
           "Example:\n"
           "    delta_q = np.zeros(oink.num_variables)\n"
-          "    oink.solveIk(tasks, constraints, barriers, scene, delta_q)");
+          "    oink.solve_ik(tasks, constraints, barriers, scene, delta_q)");
 }
 
 }  // namespace roboplan

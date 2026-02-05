@@ -7,9 +7,9 @@ namespace roboplan {
 
 PositionBarrier::PositionBarrier(const std::string& frame_name_, const Eigen::Vector3d& p_min_,
                                  const Eigen::Vector3d& p_max_, int num_variables_, double gain,
-                                 double dt, double safe_displacement_gain)
-    : Barrier(gain, dt, safe_displacement_gain), frame_name(frame_name_), indices({0, 1, 2}),
-      p_min(p_min_), p_max(p_max_) {
+                                 double dt, double safe_displacement_gain, double safety_margin)
+    : Barrier(gain, dt, safe_displacement_gain, safety_margin), frame_name(frame_name_),
+      indices({0, 1, 2}), p_min(p_min_), p_max(p_max_) {
   // Count active constraints (finite bounds)
   int num_barriers = 0;
   for (int i = 0; i < 3; ++i) {
@@ -27,9 +27,9 @@ PositionBarrier::PositionBarrier(const std::string& frame_name_, const Eigen::Ve
 PositionBarrier::PositionBarrier(const std::string& frame_name_, const std::vector<int>& indices_,
                                  const Eigen::VectorXd& p_min_, const Eigen::VectorXd& p_max_,
                                  int num_variables_, double gain, double dt,
-                                 double safe_displacement_gain)
-    : Barrier(gain, dt, safe_displacement_gain), frame_name(frame_name_), indices(indices_),
-      p_min(p_min_), p_max(p_max_) {
+                                 double safe_displacement_gain, double safety_margin)
+    : Barrier(gain, dt, safe_displacement_gain, safety_margin), frame_name(frame_name_),
+      indices(indices_), p_min(p_min_), p_max(p_max_) {
   // Validate indices
   for (int idx : indices_) {
     if (idx < 0 || idx > 2) {

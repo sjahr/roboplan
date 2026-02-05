@@ -31,13 +31,18 @@ def main(
     lm_damping: float = 2.0,
     control_freq: float = 100.0,
     max_joint_velocity: float = 1.0,
-    barrier_gain: float = 5.0,
+    barrier_gain: float = 100.0,
     barrier_size: float = 1.0,
+    safety_margin: float = 0.1,
     host: str = "localhost",
     port: str = "8000",
 ):
     """
-    Run the optimal IK example with the provided parameters.
+    Run the optimal IK example with position barrier constraints.
+
+    The barrier uses Control Barrier Functions (CBFs) to keep the end-effector
+    within a bounding box. Conservative parameters (high gain, safety margin)
+    ensure the barrier is never violated.
 
     Parameters:
         model: The name of the model to use (ur5, franka, or dual).
@@ -45,8 +50,9 @@ def main(
         lm_damping: Levenberg-Marquardt damping for regularization.
         control_freq: Control loop frequency in Hz.
         max_joint_velocity: Maximum joint velocity in rad/s for all joints.
-        barrier_gain: Barrier gain for the position barrier constraint.
+        barrier_gain: Barrier gain for CBF constraint (higher = more conservative).
         barrier_size: Size of the cubic barrier box around the EE start position (meters).
+        safety_margin: Distance from boundary where barrier activates (meters).
         host: The host for the ViserVisualizer.
         port: The port for the ViserVisualizer.
     """
@@ -107,7 +113,7 @@ def main(
     print(f"\nConfiguration space dimension (nq): {len(q_full)}")
     print(f"Velocity space dimension (nv): {num_variables}")
 
-    # Set up the Oink solver with position and velocity limit constraints
+    # Set up the Oink solver
     oink = Oink(num_variables)
 
     # Thread-safe access to tasks and scene
@@ -131,20 +137,30 @@ def main(
     initial_ee_pose = scene.forwardKinematics(q_full, model_data.ee_names[0])
     initial_ee_pos = initial_ee_pose[:3, 3]
 
-    # Create position barrier: 1x1x1m box centered on initial EE position
+    # Create position barrier with conservative parameters
+    # - High gain ensures strong resistance to boundary approach
+    # - Safety margin shifts the effective boundary inward to account for linearization errors
     half_size = barrier_size / 2.0
     p_min = initial_ee_pos - half_size
     p_max = initial_ee_pos + half_size
     position_barrier = PositionBarrier(
-        model_data.ee_names[0], p_min, p_max, num_variables, gain=barrier_gain, dt=dt
+        model_data.ee_names[0],
+        p_min,
+        p_max,
+        num_variables,
+        gain=barrier_gain,
+        dt=dt,
+        safe_displacement_gain=1.0,
+        safety_margin=safety_margin,
     )
     barriers = [position_barrier]
 
-    print(f"\nPosition Barrier:")
+    print(f"\nPosition Barrier (CBF):")
     print(f"  EE start position: {initial_ee_pos}")
     print(f"  Box min: {p_min}")
     print(f"  Box max: {p_max}")
-    print(f"  Gain: {barrier_gain}, dt: {dt}")
+    print(f"  Gain: {barrier_gain}, dt: {dt}, safety_margin: {safety_margin}")
+    print(f"  Effective boundary: {safety_margin}m inside the box")
 
     # Visualize the barrier box in Viser
     box_center = initial_ee_pos
@@ -265,15 +281,14 @@ def main(
                     # Get current joint configuration
                     q_current = scene.getCurrentJointPositions()
 
-                    # Solve IK for one step with constraints
-                    # Pre-allocate delta_q buffer for in-place modification
+                    # Solve IK for one step with constraints and barriers
                     delta_q = np.zeros(num_variables)
                     try:
-                        oink.solveIk(
+                        oink.solve_ik(
                             current_tasks, constraints, barriers, scene, delta_q
                         )
                     except RuntimeError as e:
-                        print(f"Warning: IK solver failed: {e}, using zero delta_q")
+                        print(f"Warning: IK solver failed: {e}")
 
                     # Integrate: delta_q is a displacement (already limited by VelocityLimit)
                     q_current = scene.integrate(q_current, delta_q)
@@ -282,7 +297,7 @@ def main(
                     scene.setJointPositions(q_current)
 
                     # Update forward kinematics after applying velocities
-                    # This ensures FK is current for the next iteration's solveIk
+                    # This ensures FK is current for the next iteration's solve_ik
                     for goal in goals:
                         scene.forwardKinematics(q_current, goal.tip_frame)
 

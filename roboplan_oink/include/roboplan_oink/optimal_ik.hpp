@@ -128,12 +128,20 @@ struct Constraints {
 /// This encourages the robot to move toward a known safe configuration when near
 /// constraint boundaries. The weighting by 1/‖J_h‖² normalizes the contribution
 /// based on how sensitive the barrier is to joint motion.
+///
+/// The safety_margin parameter provides a conservative buffer for hard constraints.
+/// When safety_margin > 0, the CBF constraint is tightened by this amount, meaning
+/// the barrier will begin to resist motion earlier (when h = safety_margin rather
+/// than h = 0). This compensates for linearization errors in the discrete-time
+/// formulation.
 struct Barrier {
   /// @brief Constructor with barrier parameters
   /// @param gain Barrier gain (gamma), controls aggressiveness
   /// @param dt Timestep for discrete-time formulation (must match control loop period)
-  /// @param safe_displacement_gain Gain for safe displacement regularization.
-  explicit Barrier(double gain, double dt, double safe_displacement_gain = 1.0);
+  /// @param safe_displacement_gain Gain for safe displacement regularization
+  /// @param safety_margin Conservative margin for hard constraint guarantee (default 0.0)
+  explicit Barrier(double gain, double dt, double safe_displacement_gain = 1.0,
+                   double safety_margin = 0.0);
 
   /// @brief Initialize pre-allocated storage
   /// @param num_barriers Number of barrier constraints this barrier produces
@@ -196,9 +204,12 @@ struct Barrier {
                                                      Eigen::Ref<Eigen::MatrixXd> H,
                                                      Eigen::Ref<Eigen::VectorXd> c);
 
+  virtual ~Barrier() = default;
+
   const double gain;                    ///< Barrier gain (gamma)
   const double dt;                      ///< Timestep
   const double safe_displacement_gain;  ///< Gain for safe displacement regularization
+  const double safety_margin;           ///< Conservative margin for hard constraints
   int num_variables = 0;
 
   /// Pre-allocated containers
@@ -211,7 +222,7 @@ struct Oink {
   /// @brief Constructor that initializes matrices and solver with given dimensions
   ///
   /// @param num_variables Number of optimization variables (typically number of actuatable DOFs)
-  Oink(int num_variables);
+  explicit Oink(int num_variables);
 
   /// @brief Constructor with custom settings
   ///

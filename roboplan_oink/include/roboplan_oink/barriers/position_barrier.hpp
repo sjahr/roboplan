@@ -31,11 +31,13 @@ struct PositionBarrier : public Barrier {
   /// @param gain Barrier gain (gamma), controls convergence to safe set. Default 1.0
   /// @param dt Timestep matching your control loop period. Default 0.01 (100 Hz)
   /// @param safe_displacement_gain Gain for safe displacement regularization. Default 1.0
+  /// @param safety_margin Conservative margin for hard constraint guarantee. Default 0.0
   /// @note The dt parameter significantly affects barrier behavior - ensure it matches
   ///       your actual control/integration timestep
   PositionBarrier(const std::string& frame_name, const Eigen::Vector3d& p_min,
                   const Eigen::Vector3d& p_max, int num_variables, double gain = 1.0,
-                  double dt = 0.01, double safe_displacement_gain = 1.0);
+                  double dt = 0.01, double safe_displacement_gain = 1.0,
+                  double safety_margin = 0.0);
 
   /// @brief Constructor for selective axis constraint
   /// @param frame_name Name of the frame to constrain
@@ -46,9 +48,11 @@ struct PositionBarrier : public Barrier {
   /// @param gain Barrier gain (gamma), controls convergence to safe set. Default 1.0
   /// @param dt Timestep matching your control loop period. Default 0.01 (100 Hz)
   /// @param safe_displacement_gain Gain for safe displacement regularization. Default 1.0
+  /// @param safety_margin Conservative margin for hard constraint guarantee. Default 0.0
   PositionBarrier(const std::string& frame_name, const std::vector<int>& indices,
                   const Eigen::VectorXd& p_min, const Eigen::VectorXd& p_max, int num_variables,
-                  double gain = 1.0, double dt = 0.01, double safe_displacement_gain = 1.0);
+                  double gain = 1.0, double dt = 0.01, double safe_displacement_gain = 1.0,
+                  double safety_margin = 0.0);
 
   int getNumBarriers(const Scene& scene) const override;
 

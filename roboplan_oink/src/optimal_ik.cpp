@@ -1,4 +1,5 @@
 #include <OsqpEigen/OsqpEigen.h>
+#include <pinocchio/algorithm/joint-configuration.hpp>
 #include <roboplan_oink/optimal_ik.hpp>
 
 namespace roboplan {
@@ -9,8 +10,9 @@ constexpr double kHessianRegularization = 1e-12;
 }  // namespace
 
 // Barrier base class implementation
-Barrier::Barrier(double gain_, double dt_, double safe_displacement_gain_)
-    : gain(gain_), dt(dt_), safe_displacement_gain(safe_displacement_gain_) {
+Barrier::Barrier(double gain_, double dt_, double safe_displacement_gain_, double safety_margin_)
+    : gain(gain_), dt(dt_), safe_displacement_gain(safe_displacement_gain_),
+      safety_margin(safety_margin_) {
   if (gain <= 0.0) {
     throw std::invalid_argument("Barrier gain must be positive");
   }
@@ -19,6 +21,9 @@ Barrier::Barrier(double gain_, double dt_, double safe_displacement_gain_)
   }
   if (safe_displacement_gain < 0.0) {
     throw std::invalid_argument("Barrier safe_displacement_gain must be non-negative");
+  }
+  if (safety_margin < 0.0) {
+    throw std::invalid_argument("Barrier safety_margin must be non-negative");
   }
 }
 
@@ -50,11 +55,12 @@ tl::expected<void, std::string> Barrier::computeQpInequalities(const Scene& scen
   // G = -J_h / dt
   G = -jacobian_container / dt;
 
-  // Saturating class-K function: α(h) = γ·h/(1+|h|)
-  // This provides smoother behavior and prevents over-reaction far from boundary
+  // Saturating class-K function with safety margin: α(h - m) = γ·(h - m)/(1+|h - m|)
+  // The safety margin shifts the "zero crossing" point, making the constraint more conservative.
+  // This helps account for linearization errors in discrete-time CBF formulation.
   for (int i = 0; i < barrier_values.size(); ++i) {
-    const double h_i = barrier_values[i];
-    b[i] = gain * h_i / (1.0 + std::abs(h_i));
+    const double h_shifted = barrier_values[i] - safety_margin;
+    b[i] = gain * h_shifted / (1.0 + std::abs(h_shifted));
   }
 
   return {};

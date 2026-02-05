@@ -483,6 +483,90 @@ TEST_F(PositionBarrierTest, SolverWithBarrier) {
   EXPECT_GT(final_pos[2], z_floor - 0.05) << "Barrier should limit motion";
 }
 
+// ============================================================================
+// HARD CONSTRAINT TESTS
+// ============================================================================
+
+// Test safety margin parameter
+TEST_F(PositionBarrierTest, SafetyMarginParameter) {
+  Eigen::Vector3d p_min(-1.0, -1.0, 0.0);
+  Eigen::Vector3d p_max(1.0, 1.0, 2.0);
+
+  double safety_margin = 0.05;
+  auto barrier = std::make_shared<PositionBarrier>("tool0", p_min, p_max, num_variables_, 1.0, dt_,
+                                                   1.0, safety_margin);
+
+  EXPECT_DOUBLE_EQ(barrier->safety_margin, safety_margin);
+  EXPECT_DOUBLE_EQ(barrier->safe_displacement_gain, 1.0);
+}
+
+// Test invalid safety margin
+TEST_F(PositionBarrierTest, InvalidSafetyMargin) {
+  Eigen::Vector3d p_min(-1.0, -1.0, 0.0);
+  Eigen::Vector3d p_max(1.0, 1.0, 2.0);
+
+  EXPECT_THROW(
+      {
+        auto barrier = std::make_shared<PositionBarrier>("tool0", p_min, p_max, num_variables_, 1.0,
+                                                         dt_, 1.0, -0.1);
+      },
+      std::invalid_argument);
+}
+
+// Test safety margin makes constraint more conservative
+TEST_F(PositionBarrierTest, SafetyMarginTightensConstraint) {
+  Eigen::VectorXd q = Eigen::VectorXd::Zero(num_variables_);
+  scene_->setJointPositions(q);
+  scene_->forwardKinematics(q, "tool0");
+
+  Eigen::Vector3d ee_pos =
+      scene_->getData().oMf[scene_->getModel().getFrameId("tool0")].translation();
+  Eigen::Vector3d p_min = ee_pos.array() - 0.5;
+  Eigen::Vector3d p_max = ee_pos.array() + 0.5;
+
+  // Create barriers with and without safety margin
+  auto barrier_no_margin =
+      std::make_shared<PositionBarrier>("tool0", p_min, p_max, num_variables_, 5.0, dt_, 1.0, 0.0);
+  auto barrier_with_margin =
+      std::make_shared<PositionBarrier>("tool0", p_min, p_max, num_variables_, 5.0, dt_, 1.0, 0.1);
+
+  int num_barriers = barrier_no_margin->getNumBarriers(*scene_);
+  Eigen::MatrixXd G_no(num_barriers, num_variables_);
+  Eigen::VectorXd b_no(num_barriers);
+  Eigen::MatrixXd G_with(num_barriers, num_variables_);
+  Eigen::VectorXd b_with(num_barriers);
+
+  auto result_no = barrier_no_margin->computeQpInequalities(*scene_, G_no, b_no);
+  auto result_with = barrier_with_margin->computeQpInequalities(*scene_, G_with, b_with);
+  ASSERT_TRUE(result_no.has_value());
+  ASSERT_TRUE(result_with.has_value());
+
+  // With safety margin, b values should be smaller (more conservative constraint)
+  for (int i = 0; i < num_barriers; ++i) {
+    EXPECT_LT(b_with[i], b_no[i])
+        << "Safety margin should make constraint more conservative at index " << i;
+  }
+}
+
+// Test backward compatibility: default parameters preserve old behavior
+TEST_F(PositionBarrierTest, BackwardCompatibility) {
+  Eigen::Vector3d p_min(-1.0, -1.0, 0.0);
+  Eigen::Vector3d p_max(1.0, 1.0, 2.0);
+
+  // Old-style construction (without safety_margin)
+  auto barrier_old =
+      std::make_shared<PositionBarrier>("tool0", p_min, p_max, num_variables_, 1.0, dt_);
+
+  // New-style construction with default safety_margin
+  auto barrier_new =
+      std::make_shared<PositionBarrier>("tool0", p_min, p_max, num_variables_, 1.0, dt_, 1.0, 0.0);
+
+  EXPECT_DOUBLE_EQ(barrier_old->safety_margin, 0.0);
+  EXPECT_DOUBLE_EQ(barrier_new->safety_margin, 0.0);
+  EXPECT_DOUBLE_EQ(barrier_old->gain, barrier_new->gain);
+  EXPECT_DOUBLE_EQ(barrier_old->dt, barrier_new->dt);
+}
+
 }  // namespace roboplan
 
 int main(int argc, char** argv) {
