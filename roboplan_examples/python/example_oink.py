@@ -25,6 +25,77 @@ from roboplan.optimal_ik import (
 from roboplan.viser_visualizer import ViserVisualizer
 
 
+class SE3ReferenceFilter:
+    """First-order filter for SE3 poses to prevent sudden jumps in reference commands.
+
+    Smoothly interpolates between the current filtered pose and the target pose
+    using exponential filtering for position and SLERP for orientation.
+
+    This helps maintain CBF constraint validity by preventing large instantaneous
+    changes in the task reference that would create large errors.
+    """
+
+    def __init__(self, tau: float = 0.1):
+        """Initialize the filter.
+
+        Args:
+            tau: Time constant in seconds. Larger values = slower, smoother tracking.
+                 tau=0.1 means ~63% of the step is taken per 0.1 seconds.
+        """
+        self.tau = tau
+        self.filtered_position: np.ndarray | None = None
+        self.filtered_quaternion: pin.Quaternion | None = None
+
+    def reset(self, pose: np.ndarray) -> None:
+        """Reset the filter state to a specific pose.
+
+        Args:
+            pose: 4x4 homogeneous transformation matrix.
+        """
+        self.filtered_position = pose[:3, 3].copy()
+        self.filtered_quaternion = pin.Quaternion(pose[:3, :3])
+
+    def update(self, target_pose: np.ndarray, dt: float) -> np.ndarray:
+        """Filter the target pose and return the smoothed result.
+
+        Args:
+            target_pose: 4x4 homogeneous transformation matrix (target).
+            dt: Time step in seconds.
+
+        Returns:
+            4x4 homogeneous transformation matrix (filtered).
+        """
+        target_position = target_pose[:3, 3]
+        target_quaternion = pin.Quaternion(target_pose[:3, :3])
+
+        # Initialize on first call
+        if self.filtered_position is None:
+            self.filtered_position = target_position.copy()
+            self.filtered_quaternion = target_quaternion
+            return target_pose.copy()
+
+        # Exponential filter coefficient: alpha = 1 - exp(-dt/tau)
+        # alpha -> 0 as tau -> inf (slower), alpha -> 1 as tau -> 0 (faster)
+        alpha = 1.0 - np.exp(-dt / self.tau)
+
+        # Filter position (linear interpolation)
+        self.filtered_position = self.filtered_position + alpha * (
+            target_position - self.filtered_position
+        )
+
+        # Filter orientation (SLERP)
+        self.filtered_quaternion = self.filtered_quaternion.slerp(
+            alpha, target_quaternion
+        )
+
+        # Construct filtered pose
+        filtered_pose = np.eye(4)
+        filtered_pose[:3, :3] = self.filtered_quaternion.toRotationMatrix()
+        filtered_pose[:3, 3] = self.filtered_position
+
+        return filtered_pose
+
+
 def main(
     model: str = "ur5",
     task_gain: float = 1.0,
@@ -34,6 +105,9 @@ def main(
     barrier_gain: float = 100.0,
     barrier_size: float = 1.0,
     safety_margin: float = 0.1,
+    max_position_error: float = 0.15,
+    max_rotation_error: float = 0.5,
+    reference_filter_tau: float = 0.1,
     host: str = "localhost",
     port: str = "8000",
 ):
@@ -53,6 +127,12 @@ def main(
         barrier_gain: Barrier gain for CBF constraint (higher = more conservative).
         barrier_size: Size of the cubic barrier box around the EE start position (meters).
         safety_margin: Distance from boundary where barrier activates (meters).
+        max_position_error: Maximum position error magnitude in meters. Prevents large
+            jumps that can invalidate CBF linearization.
+        max_rotation_error: Maximum rotation error magnitude in radians. Prevents large
+            jumps that can invalidate CBF linearization.
+        reference_filter_tau: Time constant for reference filtering in seconds. Smooths
+            target pose changes to prevent sudden jumps. Set to 0 to disable filtering.
         host: The host for the ViserVisualizer.
         port: The port for the ViserVisualizer.
     """
@@ -116,8 +196,7 @@ def main(
     # Set up the Oink solver
     oink = Oink(num_variables)
 
-    # Thread-safe access to tasks and scene
-    tasks_lock = threading.Lock()
+    # Thread-safe access to scene
     scene_lock = threading.Lock()
 
     # Control loop time step
@@ -161,6 +240,18 @@ def main(
     print(f"  Box max: {p_max}")
     print(f"  Gain: {barrier_gain}, dt: {dt}, safety_margin: {safety_margin}")
     print(f"  Effective boundary: {safety_margin}m inside the box")
+
+    print(f"\nError Saturation (for CBF stability):")
+    print(f"  max_position_error: {max_position_error}m")
+    print(
+        f"  max_rotation_error: {max_rotation_error} rad ({np.degrees(max_rotation_error):.1f} deg)"
+    )
+
+    print(f"\nReference Filtering:")
+    if reference_filter_tau > 0:
+        print(f"  tau: {reference_filter_tau}s (smooths target pose changes)")
+    else:
+        print(f"  Disabled (tau=0)")
 
     # Visualize the barrier box in Viser
     box_center = initial_ee_pos
@@ -208,20 +299,23 @@ def main(
     config_options = ConfigurationTaskOptions(task_gain=0.1, lm_damping=0.0)
     config_task = ConfigurationTask(q_canonical, joint_weights, config_options)
 
-    # Task list for the control loop
-    tasks = []
-
-    # Task parameters (define before using in callbacks)
+    # Task parameters (define before using in control loop)
+    # max_position_error and max_rotation_error prevent large error jumps that can
+    # invalidate the linearized CBF constraint, improving barrier stability.
     task_options = FrameTaskOptions(
         position_cost=2.0,
         orientation_cost=1.0,
         task_gain=task_gain,
         lm_damping=lm_damping,
+        max_position_error=max_position_error,
+        max_rotation_error=max_rotation_error,
     )
 
     # Goal configuration
     goals = []
     transform_controls = []
+    reference_filters = []  # One filter per EE for smooth reference tracking
+    raw_target_poses = []  # Unfiltered target poses from the controls
 
     # First, create all goals and controls
     for name in model_data.ee_names:
@@ -240,24 +334,26 @@ def main(
         )
         transform_controls.append(controls)
 
+        # Create a reference filter for this EE (if tau > 0)
+        if reference_filter_tau > 0:
+            reference_filters.append(SE3ReferenceFilter(tau=reference_filter_tau))
+        else:
+            reference_filters.append(None)  # No filtering
+
+        # Initialize raw target pose storage
+        raw_target_poses.append(np.eye(4))
+
+    # Lock for raw target poses (updated by UI callback, read by control loop)
+    raw_targets_lock = threading.Lock()
+
     # Now set up the callback after all controls are created
     def update_goals(_):
-        # Thread-safe update of tasks
-        with tasks_lock:
-            tasks.clear()
-            tasks.append(config_task)
-
-            # Set the goal from the marker position
-            for goal, controls in zip(goals, transform_controls):
-                goal.tform = pin.SE3(
+        # Store raw target poses from the marker positions (thread-safe)
+        with raw_targets_lock:
+            for i, controls in enumerate(transform_controls):
+                raw_target_poses[i] = pin.SE3(
                     pin.Quaternion(controls.wxyz[[1, 2, 3, 0]]), controls.position
                 ).homogeneous
-
-                # Create a FrameTask for this goal
-                frame_task = FrameTask(
-                    goal.tip_frame, goal, num_variables, task_options
-                )
-                tasks.append(frame_task)
 
     # Attach the callback to all controls
     for controls in transform_controls:
@@ -270,38 +366,54 @@ def main(
         while running:
             loop_start = time.time()
 
-            # Thread-safe task access
-            with tasks_lock:
-                current_tasks = tasks.copy()
+            # Get raw target poses (thread-safe)
+            with raw_targets_lock:
+                current_raw_targets = [pose.copy() for pose in raw_target_poses]
 
-            # Only solve if we have tasks
-            if current_tasks:
-                # Thread-safe scene access for IK solving
-                with scene_lock:
-                    # Get current joint configuration
-                    q_current = scene.getCurrentJointPositions()
+            # Build tasks with filtered targets
+            current_tasks = [config_task]
+            for i, (goal, raw_target, ref_filter) in enumerate(
+                zip(goals, current_raw_targets, reference_filters)
+            ):
+                # Apply reference filtering if enabled
+                if ref_filter is not None:
+                    filtered_target = ref_filter.update(raw_target, dt)
+                else:
+                    filtered_target = raw_target
 
-                    # Solve IK for one step with constraints and barriers
-                    delta_q = np.zeros(num_variables)
-                    try:
-                        oink.solve_ik(
-                            current_tasks, constraints, barriers, scene, delta_q
-                        )
-                    except RuntimeError as e:
-                        print(f"Warning: IK solver failed: {e}")
+                # Update goal with filtered pose
+                goal.tform = filtered_target
 
-                    # Integrate: delta_q is a displacement (already limited by VelocityLimit)
-                    q_current = scene.integrate(q_current, delta_q)
+                # Create a FrameTask for this goal
+                frame_task = FrameTask(
+                    goal.tip_frame, goal, num_variables, task_options
+                )
+                current_tasks.append(frame_task)
 
-                    # Update scene state
-                    scene.setJointPositions(q_current)
+            # Solve IK
+            with scene_lock:
+                # Get current joint configuration
+                q_current = scene.getCurrentJointPositions()
 
-                    # Update forward kinematics after applying velocities
-                    # This ensures FK is current for the next iteration's solve_ik
-                    for goal in goals:
-                        scene.forwardKinematics(q_current, goal.tip_frame)
+                # Solve IK for one step with constraints and barriers
+                delta_q = np.zeros(num_variables)
+                try:
+                    oink.solve_ik(current_tasks, constraints, barriers, scene, delta_q)
+                except RuntimeError as e:
+                    print(f"Warning: IK solver failed: {e}")
 
-                viz.display(q_current)
+                # Integrate: delta_q is a displacement (already limited by VelocityLimit)
+                q_current = scene.integrate(q_current, delta_q)
+
+                # Update scene state
+                scene.setJointPositions(q_current)
+
+                # Update forward kinematics after applying velocities
+                # This ensures FK is current for the next iteration's solve_ik
+                for goal in goals:
+                    scene.forwardKinematics(q_current, goal.tip_frame)
+
+            viz.display(q_current)
 
             # Maintain control loop rate
             elapsed = time.time() - loop_start
@@ -316,21 +428,27 @@ def main(
 
     @reset_button.on_click
     def reset_position(_):
-        with tasks_lock:
-            tasks.clear()
         with scene_lock:
             q_current = scene.getCurrentJointPositions()
-            for goal, controls in zip(goals, transform_controls):
+            for i, (goal, controls, ref_filter) in enumerate(
+                zip(goals, transform_controls, reference_filters)
+            ):
                 fk_tform = scene.forwardKinematics(q_current, goal.tip_frame)
                 controls.position = fk_tform[:3, 3]
                 controls.wxyz = pin.Quaternion(fk_tform[:3, :3]).coeffs()[[3, 0, 1, 2]]
+
+                # Reset the reference filter to the current pose
+                if ref_filter is not None:
+                    ref_filter.reset(fk_tform)
+
+                # Update raw target pose
+                with raw_targets_lock:
+                    raw_target_poses[i] = fk_tform.copy()
 
     random_button = viz.viewer.gui.add_button("Randomize Pose")
 
     @random_button.on_click
     def randomize_position(_):
-        with tasks_lock:
-            tasks.clear()
         with scene_lock:
             q_rand = scene.randomCollisionFreePositions()
             scene.setJointPositions(q_rand)

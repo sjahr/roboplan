@@ -1,5 +1,7 @@
 #include <roboplan_oink/tasks/frame.hpp>
 
+#include <cmath>
+
 #include <pinocchio/algorithm/jacobian.hpp>
 #include <pinocchio/spatial/explog.hpp>
 
@@ -38,6 +40,25 @@ tl::expected<void, std::string> FrameTask::computeError(const Scene& scene) {
   // Error is the tangent vector from current frame to target (toward goal)
   const pinocchio::Motion error_motion = pinocchio::log6(transform_target_to_frame);
   error_container = error_motion.toVector();
+
+  // Saturate position error (first 3 components) if limit is finite
+  // This prevents large jumps that can invalidate CBF linearization
+  if (std::isfinite(max_position_error)) {
+    Eigen::Vector3d pos_error = error_container.head<kPositionDimension>();
+    const double pos_norm = pos_error.norm();
+    if (pos_norm > max_position_error) {
+      error_container.head<kPositionDimension>() = pos_error * (max_position_error / pos_norm);
+    }
+  }
+
+  // Saturate rotation error (last 3 components) if limit is finite
+  if (std::isfinite(max_rotation_error)) {
+    Eigen::Vector3d rot_error = error_container.tail<kOrientationDimension>();
+    const double rot_norm = rot_error.norm();
+    if (rot_norm > max_rotation_error) {
+      error_container.tail<kOrientationDimension>() = rot_error * (max_rotation_error / rot_norm);
+    }
+  }
 
   return {};
 }

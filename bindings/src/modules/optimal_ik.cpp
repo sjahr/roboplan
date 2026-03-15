@@ -1,3 +1,5 @@
+#include <limits>
+
 #include <nanobind/eigen/dense.h>
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/shared_ptr.h>
@@ -28,13 +30,19 @@ void init_optimal_ik(nanobind::module_& m) {
 
   // Bind FrameTaskOptions configuration struct
   nanobind::class_<FrameTaskOptions>(m, "FrameTaskOptions", "Parameters for FrameTask.")
-      .def(nanobind::init<double, double, double, double>(), "position_cost"_a = 1.0,
-           "orientation_cost"_a = 1.0, "task_gain"_a = 1.0, "lm_damping"_a = 0.0,
+      .def(nanobind::init<double, double, double, double, double, double>(),
+           "position_cost"_a = 1.0, "orientation_cost"_a = 1.0, "task_gain"_a = 1.0,
+           "lm_damping"_a = 0.0, "max_position_error"_a = std::numeric_limits<double>::infinity(),
+           "max_rotation_error"_a = std::numeric_limits<double>::infinity(),
            "Constructor with custom parameters.")
       .def_rw("position_cost", &FrameTaskOptions::position_cost, "Position cost weight.")
       .def_rw("orientation_cost", &FrameTaskOptions::orientation_cost, "Orientation cost weight.")
       .def_rw("task_gain", &FrameTaskOptions::task_gain, "Task gain for low-pass filtering.")
-      .def_rw("lm_damping", &FrameTaskOptions::lm_damping, "Levenberg-Marquardt damping.");
+      .def_rw("lm_damping", &FrameTaskOptions::lm_damping, "Levenberg-Marquardt damping.")
+      .def_rw("max_position_error", &FrameTaskOptions::max_position_error,
+              "Maximum position error magnitude (meters). Infinite = no limit.")
+      .def_rw("max_rotation_error", &FrameTaskOptions::max_rotation_error,
+              "Maximum rotation error magnitude (radians). Infinite = no limit.");
 
   // Bind FrameTask inheriting from Task
   nanobind::class_<FrameTask, Task>(m, "FrameTask",
@@ -43,7 +51,11 @@ void init_optimal_ik(nanobind::module_& m) {
                           const FrameTaskOptions&>(),
            "frame_name"_a, "target_pose"_a, "num_variables"_a, "options"_a = FrameTaskOptions{})
       .def_rw("frame_name", &FrameTask::frame_name, "Name of the frame to control.")
-      .def_rw("target_pose", &FrameTask::target_pose, "Target pose for the frame.");
+      .def_rw("target_pose", &FrameTask::target_pose, "Target pose for the frame.")
+      .def_rw("max_position_error", &FrameTask::max_position_error,
+              "Maximum position error magnitude (meters).")
+      .def_rw("max_rotation_error", &FrameTask::max_rotation_error,
+              "Maximum rotation error magnitude (radians).");
 
   // Bind ConfigurationTaskOptions configuration struct
   nanobind::class_<ConfigurationTaskOptions>(m, "ConfigurationTaskOptions",
