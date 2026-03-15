@@ -37,6 +37,18 @@ target_link_libraries(
   roboplan_example_models::roboplan_example_models
 )
 
+# Build JointVelocityTask unit tests
+add_executable(test_joint_velocity_task tasks/test_joint_velocity_task.cpp)
+set_property(TARGET test_joint_velocity_task PROPERTY CXX_STANDARD 20)
+target_link_libraries(
+  test_joint_velocity_task
+  roboplan::roboplan
+  roboplan_oink
+  GTest::gmock_main
+  GTest::gtest_main
+  roboplan_example_models::roboplan_example_models
+)
+
 # Build VelocityLimit unit tests
 add_executable(test_velocity_limit constraints/test_velocity_limit.cpp)
 set_property(TARGET test_velocity_limit PROPERTY CXX_STANDARD 20)
@@ -79,6 +91,7 @@ if ( ament_cmake_gtest_FOUND )
     ament_add_gtest_test(test_oink)
     ament_add_gtest_test(test_frame_task)
     ament_add_gtest_test(test_configuration_task)
+    ament_add_gtest_test(test_joint_velocity_task)
     ament_add_gtest_test(test_velocity_limit)
     ament_add_gtest_test(test_position_limit)
     ament_add_gtest_test(test_position_barrier)
@@ -87,6 +100,7 @@ else()
     gtest_discover_tests(test_oink)
     gtest_discover_tests(test_frame_task)
     gtest_discover_tests(test_configuration_task)
+    gtest_discover_tests(test_joint_velocity_task)
     gtest_discover_tests(test_velocity_limit)
     gtest_discover_tests(test_position_limit)
     gtest_discover_tests(test_position_barrier)

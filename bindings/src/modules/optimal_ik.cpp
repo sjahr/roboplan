@@ -13,6 +13,7 @@
 #include <roboplan_oink/optimal_ik.hpp>
 #include <roboplan_oink/tasks/configuration.hpp>
 #include <roboplan_oink/tasks/frame.hpp>
+#include <roboplan_oink/tasks/joint_velocity.hpp>
 
 #include <modules/optimal_ik.hpp>
 
@@ -74,6 +75,28 @@ void init_optimal_ik(nanobind::module_& m) {
       .def_rw("target_q", &ConfigurationTask::target_q, "Target joint configuration.")
       .def_rw("joint_weights", &ConfigurationTask::joint_weights,
               "Weights for each joint in the configuration task.");
+
+  // Bind JointVelocityTaskOptions configuration struct
+  nanobind::class_<JointVelocityTaskOptions>(m, "JointVelocityTaskOptions",
+                                             "Parameters for JointVelocityTask.")
+      .def(nanobind::init<double, double>(), "task_gain"_a = 1.0, "lm_damping"_a = 0.0)
+      .def_rw("task_gain", &JointVelocityTaskOptions::task_gain,
+              "Task gain for low-pass filtering.")
+      .def_rw("lm_damping", &JointVelocityTaskOptions::lm_damping, "Levenberg-Marquardt damping.");
+
+  // Bind JointVelocityTask inheriting from Task
+  nanobind::class_<JointVelocityTask, Task>(
+      m, "JointVelocityTask",
+      "Task to track a target joint velocity/displacement.\n\n"
+      "Minimizes ||dq - target_delta_q||^2, useful for safety filtering where\n"
+      "a nominal joint command is minimally modified to satisfy constraints.")
+      .def(nanobind::init<const Eigen::VectorXd&, const Eigen::VectorXd&,
+                          const JointVelocityTaskOptions&>(),
+           "target_delta_q"_a, "joint_weights"_a, "options"_a = JointVelocityTaskOptions{})
+      .def_rw("target_delta_q", &JointVelocityTask::target_delta_q,
+              "Target joint velocity/displacement.")
+      .def_rw("joint_weights", &JointVelocityTask::joint_weights,
+              "Weights for each joint in the velocity task.");
 
   // Bind the abstract Constraints base class
   nanobind::class_<Constraints>(m, "Constraints", "Abstract base class for IK constraints.");
