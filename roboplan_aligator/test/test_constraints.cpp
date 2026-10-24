@@ -72,7 +72,8 @@ double peakTorque(const std::vector<Eigen::VectorXd>& us) {
 
 TEST(ConstraintTest, TorqueLimitResidualIsControlAndBoxIsModelEffort) {
   ConstraintFixture f;
-  const auto pair = aligator_detail::buildTorqueLimit(f.space, f.rgm, TorqueLimit{});
+  const auto pair =
+      aligator_detail::buildConstraint(f.space, f.rgm, TorqueLimit{}, /*is_terminal=*/false);
 
   // Value = u exactly (Euclidean control residual).
   const Eigen::VectorXd u = Eigen::VectorXd::LinSpaced(f.nv(), -0.7, 1.3);
@@ -95,18 +96,33 @@ TEST(ConstraintTest, UserBoundClampsToModel) {
   const int nv = f.nv();
 
   // The default box comes from the model's effort limits.
-  const auto default_tau = aligator_detail::buildTorqueLimit(f.space, f.rgm, TorqueLimit{});
+  const auto default_tau =
+      aligator_detail::buildConstraint(f.space, f.rgm, TorqueLimit{}, /*is_terminal=*/false);
   const Eigen::VectorXd model_tau_upper = asBox(default_tau).upper_limit;
 
   // A user tau_max is symmetric [-tau_max, +tau_max], intersected with the model's per-DoF upper.
   TorqueLimit tight;
   tight.tau_max = Eigen::VectorXd::Constant(nv, 0.5);
-  const auto clamped_tau = aligator_detail::buildTorqueLimit(f.space, f.rgm, tight);
+  const auto clamped_tau =
+      aligator_detail::buildConstraint(f.space, f.rgm, tight, /*is_terminal=*/false);
   EXPECT_LT((asBox(clamped_tau).upper_limit - model_tau_upper.cwiseMin(0.5)).cwiseAbs().maxCoeff(),
             1e-12);
   EXPECT_LT(
       (asBox(clamped_tau).lower_limit - (-model_tau_upper.cwiseMin(0.5))).cwiseAbs().maxCoeff(),
       1e-12);
+}
+
+// --- Factory-level guard: the terminal rejection lives in the TorqueLimit overload --------------
+
+TEST(ConstraintTest, TorqueLimitFactoryRejectsTerminal) {
+  ConstraintFixture f;
+  // The terminal node has no control, so a control-box constraint there is ill-defined. The
+  // overload itself rejects it, independent of which TrajectoryOptimizer entry point called it.
+  EXPECT_THROW(
+      aligator_detail::buildConstraint(f.space, f.rgm, TorqueLimit{}, /*is_terminal=*/true),
+      std::invalid_argument);
+  EXPECT_NO_THROW(
+      aligator_detail::buildConstraint(f.space, f.rgm, TorqueLimit{}, /*is_terminal=*/false));
 }
 
 // --- Stage targeting: a constraint attaches to exactly one stage -------------------------------

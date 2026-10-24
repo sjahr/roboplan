@@ -10,9 +10,10 @@ namespace roboplan::aligator_detail {
 
 using CostStack = aligator::CostStackTpl<double>;
 
-/// @brief Internal helper shared by `attachConfigurationCost` and `attachVelocityCost`: both
-/// insert a `QuadraticStateCostTpl` masked to exactly one tangent block of the state space
-/// (ndx = 2*nv), differing only in *which* block is masked and how the target vector is built.
+/// @brief Internal helper shared by the `ConfigurationCost` and `VelocityCost` overloads of
+/// `attachCost`: both insert a `QuadraticStateCostTpl` masked to exactly one tangent block of the
+/// state space (ndx = 2*nv), differing only in *which* block is masked and how the target vector
+/// is built.
 ///
 /// Builds the ndx x ndx diagonal weight matrix restricted to one tangent block (the
 /// configuration-tangent block [0, nv) when `mask_configuration_block` is true, else the

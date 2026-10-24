@@ -17,16 +17,20 @@ namespace aligator_detail {
 
 using CostStack = aligator::CostStackTpl<double>;
 
-// Each attach* function builds the concrete aligator cost from a spec and inserts it into `stack`
-// exactly once, at stage-assembly time -- there is no post-insertion mutation, so nothing is
-// returned (aligator's own idiom: build each stage's cost fully, once).
+// `attachCost` is an overload set keyed on the spec type: each overload builds the concrete
+// aligator cost from its spec and inserts it into `stack` exactly once, at stage-assembly time --
+// there is no post-insertion mutation, so nothing is returned (aligator's own idiom: build each
+// stage's cost fully, once).
+//
+// Every CostSpec alternative must have exactly one overload here. The dispatcher in
+// trajectory_optimizer.cpp is a type-blind std::visit over CostSpec, so a missing overload is a
+// compile error rather than a silently dropped cost.
 
-void attachConfigurationCost(CostStack& stack, const PhaseSpace& space,
-                             const ReducedGroupModel& rgm, const ConfigurationCost& spec,
-                             double weight);
+void attachCost(CostStack& stack, const PhaseSpace& space, const ReducedGroupModel& rgm,
+                const ConfigurationCost& spec, double weight);
 
-void attachVelocityCost(CostStack& stack, const PhaseSpace& space, const ReducedGroupModel& rgm,
-                        const VelocityCost& spec, double weight);
+void attachCost(CostStack& stack, const PhaseSpace& space, const ReducedGroupModel& rgm,
+                const VelocityCost& spec, double weight);
 
 }  // namespace aligator_detail
 

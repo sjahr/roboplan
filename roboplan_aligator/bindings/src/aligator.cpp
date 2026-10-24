@@ -1,6 +1,7 @@
 #include <nanobind/nanobind.h>
 
 #include <string>
+#include <variant>
 
 #include <nanobind/eigen/dense.h>
 #include <nanobind/stl/shared_ptr.h>
@@ -30,6 +31,19 @@ namespace roboplan {
 
 namespace nb = nanobind;
 using namespace nanobind::literals;
+
+namespace {
+
+// Calls `f.template operator()<T>()` once for each alternative T of the std::variant `Variant`.
+// Used to generate one nanobind overload per CostSpec / ConstraintSpec alternative, so adding a
+// spec type to the variant is all that is needed to expose it to Python.
+template <class Variant, class F> void forEachAlternative(F&& f) {
+  [&f]<class... Ts>(std::variant<Ts...>*) {
+    (f.template operator()<Ts>(), ...);
+  }(static_cast<Variant*>(nullptr));
+}
+
+}  // namespace
 
 void init_aligator(nb::module_& m) {
   // --- Options + integrator -------------------------------------------------------------------
@@ -158,10 +172,11 @@ void init_aligator(nb::module_& m) {
 
   // --- The optimizer ---------------------------------------------------------------------------
 
-  nb::class_<TrajectoryOptimizer>(
+  auto optimizer = nb::class_<TrajectoryOptimizer>(
       m, "TrajectoryOptimizer",
       "Trajectory optimizer wrapping aligator's proximal-DDP solver over reduced-model free-space "
-      "multibody dynamics.")
+      "multibody dynamics.");
+  optimizer
       .def(nb::init<std::shared_ptr<Scene>, std::string, int, double, TrajOptOptions>(), "scene"_a,
            "group_name"_a, "horizon"_a, "dt"_a, "options"_a = TrajOptOptions{})
       .def("horizon", &TrajectoryOptimizer::horizon, "Number of stages N.")
@@ -171,65 +186,60 @@ void init_aligator(nb::module_& m) {
       .def("nv", &TrajectoryOptimizer::nv, "Reduced-model tangent size nv.")
       .def("nx", &TrajectoryOptimizer::nx, "State dimension nx = nq + nv.")
       .def("setInitialState", &TrajectoryOptimizer::setInitialState, "q"_a,
-           "Set the fixed initial configuration state x0 = [q; 0] (hot-path).")
-      // addCost/addStageCost/addTerminalCost: each overload accepts a concrete cost type and
-      // wraps it in CostSpec for the unified C++ method. Consumed once, inside build() -- there is
-      // no post-build retargeting; call resetProblem() + re-add + build() to change a target.
-      .def(
-          "addCost",
-          [](TrajectoryOptimizer& self, const ConfigurationCost& cost, double weight) {
-            self.addCost(CostSpec(cost), weight);
-          },
-          "cost"_a, "weight"_a = 1.0, "Attach a cost to every stage.")
-      .def(
-          "addCost",
-          [](TrajectoryOptimizer& self, const VelocityCost& cost, double weight) {
-            self.addCost(CostSpec(cost), weight);
-          },
-          "cost"_a, "weight"_a = 1.0, "Attach a cost to every stage.")
-      .def(
-          "addStageCost",
-          [](TrajectoryOptimizer& self, int stage, const ConfigurationCost& cost, double weight) {
-            self.addStageCost(stage, CostSpec(cost), weight);
-          },
-          "stage"_a, "cost"_a, "weight"_a = 1.0, "Attach a cost to exactly stage `stage`.")
-      .def(
-          "addStageCost",
-          [](TrajectoryOptimizer& self, int stage, const VelocityCost& cost, double weight) {
-            self.addStageCost(stage, CostSpec(cost), weight);
-          },
-          "stage"_a, "cost"_a, "weight"_a = 1.0, "Attach a cost to exactly stage `stage`.")
-      .def(
-          "addTerminalCost",
-          [](TrajectoryOptimizer& self, const ConfigurationCost& cost, double weight) {
-            self.addTerminalCost(CostSpec(cost), weight);
-          },
-          "cost"_a, "weight"_a = 1.0, "Attach a cost to the terminal node.")
-      .def(
-          "addTerminalCost",
-          [](TrajectoryOptimizer& self, const VelocityCost& cost, double weight) {
-            self.addTerminalCost(CostSpec(cost), weight);
-          },
-          "cost"_a, "weight"_a = 1.0, "Attach a cost to the terminal node.")
-      // addConstraint/addStageConstraint/addTerminalConstraint: same pattern for constraint specs.
-      .def(
-          "addConstraint",
-          [](TrajectoryOptimizer& self, const TorqueLimit& c) {
-            self.addConstraint(ConstraintSpec(c));
-          },
-          "constraint"_a, "Attach a constraint to every stage.")
-      .def(
-          "addStageConstraint",
-          [](TrajectoryOptimizer& self, int stage, const TorqueLimit& c) {
-            self.addStageConstraint(stage, ConstraintSpec(c));
-          },
-          "stage"_a, "constraint"_a, "Attach a constraint to exactly stage `stage`.")
-      .def(
-          "addTerminalConstraint",
-          [](TrajectoryOptimizer& self, const TorqueLimit& c) {
-            self.addTerminalConstraint(ConstraintSpec(c));
-          },
-          "constraint"_a, "Attach a constraint to the terminal node.")
+           "Set the fixed initial configuration state x0 = [q; 0] (hot-path).");
+
+  // addCost/addStageCost/addTerminalCost and addConstraint/addStageConstraint/
+  // addTerminalConstraint: one Python overload per spec type, generated from the CostSpec /
+  // ConstraintSpec alternatives so the variant is the single list of supported types for both C++
+  // and Python. Each overload wraps the concrete spec in the variant for the unified C++ method.
+  // Consumed once, inside build() -- there is no post-build retargeting; call resetProblem() +
+  // re-add + build() to change a target. Defined here, between setInitialState and build, so the
+  // generated .pyi keeps its method order.
+  forEachAlternative<CostSpec>([&]<class Cost>() {
+    optimizer
+        .def(
+            "addCost",
+            [](TrajectoryOptimizer& self, const Cost& cost, double weight) {
+              self.addCost(CostSpec(cost), weight);
+            },
+            "cost"_a, "weight"_a = 1.0, "Attach a cost to every stage.")
+        .def(
+            "addStageCost",
+            [](TrajectoryOptimizer& self, int stage, const Cost& cost, double weight) {
+              self.addStageCost(stage, CostSpec(cost), weight);
+            },
+            "stage"_a, "cost"_a, "weight"_a = 1.0, "Attach a cost to exactly stage `stage`.")
+        .def(
+            "addTerminalCost",
+            [](TrajectoryOptimizer& self, const Cost& cost, double weight) {
+              self.addTerminalCost(CostSpec(cost), weight);
+            },
+            "cost"_a, "weight"_a = 1.0, "Attach a cost to the terminal node.");
+  });
+
+  forEachAlternative<ConstraintSpec>([&]<class Constraint>() {
+    optimizer
+        .def(
+            "addConstraint",
+            [](TrajectoryOptimizer& self, const Constraint& c) {
+              self.addConstraint(ConstraintSpec(c));
+            },
+            "constraint"_a, "Attach a constraint to every stage.")
+        .def(
+            "addStageConstraint",
+            [](TrajectoryOptimizer& self, int stage, const Constraint& c) {
+              self.addStageConstraint(stage, ConstraintSpec(c));
+            },
+            "stage"_a, "constraint"_a, "Attach a constraint to exactly stage `stage`.")
+        .def(
+            "addTerminalConstraint",
+            [](TrajectoryOptimizer& self, const Constraint& c) {
+              self.addTerminalConstraint(ConstraintSpec(c));
+            },
+            "constraint"_a, "Attach a constraint to the terminal node.");
+  });
+
+  optimizer
       .def(
           "build", &TrajectoryOptimizer::build,
           "Finalize the problem (allocate the solver workspace and freeze the structure); required "

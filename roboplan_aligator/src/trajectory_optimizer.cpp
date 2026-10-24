@@ -50,42 +50,25 @@ void requireUnlocked(bool locked) {
   }
 }
 
-// Dispatches a CostSpec to the matching factory: builds the concrete aligator cost and
-// inserts it into `stack` once, at stage-assembly time.
+// Dispatches a CostSpec to the matching `attachCost` overload: builds the concrete aligator cost
+// and inserts it into `stack` once, at stage-assembly time. Exhaustiveness is enforced by the
+// compiler: a CostSpec alternative without an `attachCost` overload fails to instantiate here.
 void applyCostSpec(CostStack& stack, const aligator_detail::PhaseSpace& space,
                    const ReducedGroupModel& rgm, const CostSpec& spec, double weight) {
-  std::visit(
-      [&](const auto& s) {
-        using T = std::decay_t<decltype(s)>;
-        if constexpr (std::is_same_v<T, ConfigurationCost>) {
-          aligator_detail::attachConfigurationCost(stack, space, rgm, s, weight);
-        } else if constexpr (std::is_same_v<T, VelocityCost>) {
-          aligator_detail::attachVelocityCost(stack, space, rgm, s, weight);
-        }
-      },
-      spec);
+  std::visit([&](const auto& s) { aligator_detail::attachCost(stack, space, rgm, s, weight); },
+             spec);
 }
 
-// Dispatches a ConstraintSpec to the matching factory, building the (residual, set) pair.
-// `is_terminal` lets the factory reject targets it does not support (e.g. TorqueLimit at the
-// terminal node, which has no control) at the call site, not deferred to build().
+// Dispatches a ConstraintSpec to the matching `buildConstraint` overload, building the
+// (residual, set) pair. `is_terminal` lets the overload reject targets it does not support (e.g.
+// TorqueLimit at the terminal node, which has no control) at the call site, not deferred to
+// build(). Exhaustiveness is enforced by the compiler: a ConstraintSpec alternative without a
+// `buildConstraint` overload fails to instantiate here.
 aligator_detail::ConstraintPair buildConstraintPair(const aligator_detail::PhaseSpace& space,
                                                     const ReducedGroupModel& rgm,
                                                     const ConstraintSpec& spec, bool is_terminal) {
   return std::visit(
-      [&](const auto& s) -> aligator_detail::ConstraintPair {
-        using T = std::decay_t<decltype(s)>;
-        if constexpr (std::is_same_v<T, TorqueLimit>) {
-          if (is_terminal) {
-            throw std::invalid_argument(
-                "TrajectoryOptimizer::addTerminalConstraint: a TorqueLimit cannot target the "
-                "terminal node; the terminal node has no control.");
-          }
-          return aligator_detail::buildTorqueLimit(space, rgm, s);
-        }
-        // Unreachable: ConstraintSpec is a closed variant, all alternatives handled above.
-        throw std::logic_error("buildConstraintPair: unhandled ConstraintSpec alternative.");
-      },
+      [&](const auto& s) { return aligator_detail::buildConstraint(space, rgm, s, is_terminal); },
       spec);
 }
 

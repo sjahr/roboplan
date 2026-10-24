@@ -33,8 +33,13 @@ void checkUserBoundSize(const Eigen::VectorXd& bound, int expected, const char* 
 
 }  // namespace
 
-ConstraintPair buildTorqueLimit(const PhaseSpace& space, const ReducedGroupModel& rgm,
-                                const TorqueLimit& spec) {
+ConstraintPair buildConstraint(const PhaseSpace& space, const ReducedGroupModel& rgm,
+                               const TorqueLimit& spec, bool is_terminal) {
+  if (is_terminal) {
+    throw std::invalid_argument(
+        "TrajectoryOptimizer::addTerminalConstraint: a TorqueLimit cannot target the terminal "
+        "node; the terminal node has no control.");
+  }
   const int nv = rgm.nv();
   const int ndx = space.ndx();
   checkUserBoundSize(spec.tau_max, nv, "TorqueLimit tau_max");

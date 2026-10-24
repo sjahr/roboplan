@@ -91,7 +91,7 @@ TEST(CostTest, ConfigurationCostGradientMatchesFD) {
   spec.weights = Eigen::VectorXd::LinSpaced(f.nv(), 1.0, 2.0);
 
   CostStack stack(ManifoldPoly(f.space), f.nv());
-  aligator_detail::attachConfigurationCost(stack, f.space, f.rgm, spec, 1.0);
+  aligator_detail::attachCost(stack, f.space, f.rgm, spec, 1.0);
   auto* cost = stack.getComponent<CostAbstract>(std::size_t{0});
   const Eigen::VectorXd x = deterministicState(f.space);
   expectCostGradientMatchesFD(*cost, f.space, x, Eigen::VectorXd::Constant(f.nv(), 0.2));
@@ -103,7 +103,7 @@ TEST(CostTest, VelocityCostGradientMatchesFD) {
   spec.weights = Eigen::VectorXd::LinSpaced(f.nv(), 1.0, 2.5);
 
   CostStack stack(ManifoldPoly(f.space), f.nv());
-  aligator_detail::attachVelocityCost(stack, f.space, f.rgm, spec, 1.0);
+  aligator_detail::attachCost(stack, f.space, f.rgm, spec, 1.0);
   auto* cost = stack.getComponent<CostAbstract>(std::size_t{0});
   const Eigen::VectorXd x = deterministicState(f.space);
   expectCostGradientMatchesFD(*cost, f.space, x, Eigen::VectorXd::Constant(f.nv(), 0.2));

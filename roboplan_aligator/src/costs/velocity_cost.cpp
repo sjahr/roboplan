@@ -8,8 +8,8 @@
 
 namespace roboplan::aligator_detail {
 
-void attachVelocityCost(CostStack& stack, const PhaseSpace& space, const ReducedGroupModel& rgm,
-                        const VelocityCost& spec, double weight) {
+void attachCost(CostStack& stack, const PhaseSpace& space, const ReducedGroupModel& rgm,
+                const VelocityCost& spec, double weight) {
   const int nq = rgm.nq();
   const int nv = rgm.nv();
   if (spec.weights.size() != nv) {
